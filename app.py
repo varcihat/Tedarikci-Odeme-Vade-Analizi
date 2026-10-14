@@ -7,7 +7,9 @@ st.set_page_config(
 )
 
 st.title("🤝 Tedarikçi Bazlı Net Borç ve Vade Performans Paneli")
-st.markdown("ERP Ekstresinden Kesin Bakiye ve Cari Analizi.")
+st.markdown(
+    "ERP Ekstresinden Kesin Bakiye, Cari Analizi ve Vade Takip Sistemi."
+)
 
 if "master_db" not in st.session_state:
   st.session_state.master_db = pd.DataFrame()
@@ -39,51 +41,47 @@ if not st.session_state.master_db.empty:
   ozet_df = pd.DataFrame()
 
   try:
-    # Güvenli Kolon Tespiti
-    col_names = df.columns.tolist()
-    desc_col = col_names[3] if len(col_names) > 3 else col_names[0]
-    bakiye_col = col_names[6] if len(col_names) > 6 else col_names[-1]
+    desc_col = df.columns[3] if len(df.columns) > 3 else df.columns[0]
+    bakiye_col = df.columns[6] if len(df.columns) > 6 else df.columns[-1]
 
     cariler_dict = {}
     aktif_cari = None
-    son_bakiye = 0.0
+    son_try_bakiye = 0.0
+    is_try_section = True
 
     for idx, row in df.iterrows():
-      val = str(row[desc_col]) if pd.notna(row[desc_col]) else ""
       col0 = str(row[0]) if pd.notna(row[0]) else ""
+      val3 = str(row[3]) if pd.notna(row[3]) else ""
 
-      # Yeni cari unvanı tespiti (Kod satırları veya unvan içeren yapılar)
+      # Para birimi değişimi tespiti
+      if val3 in ["EUR", "USD"]:
+        is_try_section = False
+      elif val3 == "TRY":
+        is_try_section = True
+
+      # Yeni cari başlangıcı (1-1-1- kodları)
+      if col0.startswith("1-1-1-"):
+        if aktif_cari and is_try_section:
+          cariler_dict[aktif_cari] = son_try_bakiye
+        aktif_cari = val3
+        son_try_bakiye = 0.0
+        is_try_section = True
+
+      # Kesin toplam satırı tespiti
       if (
-          ("A.Ş." in val or "LTD" in val or "SANİ" in val or "TİC" in val or "AŞ" in val)
-          and "Vade Tarihi" not in val
-          and "Gönderilen" not in val
-          and "Gelen" not in val
+          ("Toplam" in val3 or "Toplam" in col0 or col0 == "Toplam")
+          and is_try_section
+          and aktif_cari
       ):
-        if aktif_cari:
-          cariler_dict[aktif_cari] = son_bakiye
-        aktif_cari = val
-        son_bakiye = 0.0
+        try:
+          bval = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
+          son_try_bakiye = bval
+        except:
+          pass
 
-      # Satırdaki bakiye değerini güvenli şekilde al
-      try:
-        b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
-        # Satır bir toplam veya ay özeti ise bakiye güncellenir
-        if "Toplam" in val or " / " in val or "Devir" in val or col0 != "":
-          son_bakiye = b_val
-      except:
-        pass
-
-    if aktif_cari:
-      cariler_dict[aktif_cari] = son_bakiye
-
-    # Eğer yukarıdaki yöntemle boş kalırsa doğrudan alternatif tarama yapalım
-    if not cariler_dict:
-      for idx, row in df.iterrows():
-        val = str(row[desc_col]) if pd.notna(row[desc_col]) else ""
-        if (
-            "A.Ş." in val or "LTD" in val or "SANİ" in val or "TİC" in val
-        ) and "Vade" not in val:
-          cariler_dict[val] = 100000.00  # Varsayılan emniyet bandı
+    # Son cariyi kaydet
+    if aktif_cari and is_try_section:
+      cariler_dict[aktif_cari] = son_try_bakiye
 
     if cariler_dict:
       ozet_df = pd.DataFrame(
@@ -91,6 +89,7 @@ if not st.session_state.master_db.empty:
           columns=["Cari Unvanı", "Ham_Bakiye"],
       )
 
+      # 0 bakiye olanları veya kapananları da görebilmek için filtrelemiyoruz, dilersen filtre eklenebilir
       def format_tl(val):
         try:
           formatted = (
@@ -119,7 +118,7 @@ if not st.session_state.master_db.empty:
       ]
 
   except Exception as parse_err:
-    st.error(f"Veri işleme hatası detayı: {parse_err}")
+    st.error(f"Veri işleme hatası: {parse_err}")
 
   if not display_df.empty:
     st.subheader("📋 Tüm Cariler ve Kesin Güncel Borç Durumları")
@@ -143,10 +142,7 @@ if not st.session_state.master_db.empty:
     with col3:
       st.metric(label="Genel Vade Ortalaması", value="64 Gün")
   else:
-    st.warning(
-        "Ekstre tarandı ancak eşleşen cari tablosu oluşturulamadı. Lütfen"
-        " dosya yapısını kontrol edin."
-    )
+    st.warning("Veriler işlendi ancak gösterilecek tablo oluşturulamadı.")
 
   if st.sidebar.button("🗑️ Veri Havuzunu Sıfırla"):
     st.session_state.master_db = pd.DataFrame()
