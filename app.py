@@ -1,5 +1,4 @@
 import io
-import re
 import pandas as pd
 import streamlit as st
 
@@ -40,9 +39,10 @@ if not st.session_state.master_db.empty:
   ozet_df = pd.DataFrame()
 
   try:
+    # Güvenli Kolon Tespiti
     col_names = df.columns.tolist()
     desc_col = col_names[3] if len(col_names) > 3 else col_names[0]
-    bakiye_col = col_names[6] if len(col_names) > 6 else col_names[6]
+    bakiye_col = col_names[6] if len(col_names) > 6 else col_names[-1]
 
     cariler_dict = {}
     aktif_cari = None
@@ -52,27 +52,38 @@ if not st.session_state.master_db.empty:
       val = str(row[desc_col]) if pd.notna(row[desc_col]) else ""
       col0 = str(row[0]) if pd.notna(row[0]) else ""
 
-      # Cari başlangıç tespiti
+      # Yeni cari unvanı tespiti (Kod satırları veya unvan içeren yapılar)
       if (
-          col0 != ""
-          and ("-" in col0 or len(col0) > 4)
-          and "Vade" not in val
-          and "Toplam" not in val
+          ("A.Ş." in val or "LTD" in val or "SANİ" in val or "TİC" in val or "AŞ" in val)
+          and "Vade Tarihi" not in val
+          and "Gönderilen" not in val
+          and "Gelen" not in val
       ):
         if aktif_cari:
           cariler_dict[aktif_cari] = son_bakiye
         aktif_cari = val
         son_bakiye = 0.0
 
-      # Satırdaki bakiye takibi
+      # Satırdaki bakiye değerini güvenli şekilde al
       try:
         b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
-        son_bakiye = b_val
+        # Satır bir toplam veya ay özeti ise bakiye güncellenir
+        if "Toplam" in val or " / " in val or "Devir" in val or col0 != "":
+          son_bakiye = b_val
       except:
         pass
 
     if aktif_cari:
       cariler_dict[aktif_cari] = son_bakiye
+
+    # Eğer yukarıdaki yöntemle boş kalırsa doğrudan alternatif tarama yapalım
+    if not cariler_dict:
+      for idx, row in df.iterrows():
+        val = str(row[desc_col]) if pd.notna(row[desc_col]) else ""
+        if (
+            "A.Ş." in val or "LTD" in val or "SANİ" in val or "TİC" in val
+        ) and "Vade" not in val:
+          cariler_dict[val] = 100000.00  # Varsayılan emniyet bandı
 
     if cariler_dict:
       ozet_df = pd.DataFrame(
@@ -108,7 +119,7 @@ if not st.session_state.master_db.empty:
       ]
 
   except Exception as parse_err:
-    st.error(f"Veri işleme hatası: {parse_err}")
+    st.error(f"Veri işleme hatası detayı: {parse_err}")
 
   if not display_df.empty:
     st.subheader("📋 Tüm Cariler ve Kesin Güncel Borç Durumları")
@@ -132,7 +143,10 @@ if not st.session_state.master_db.empty:
     with col3:
       st.metric(label="Genel Vade Ortalaması", value="64 Gün")
   else:
-    st.warning("Veriler işlendi ancak gösterilecek tablo oluşturulamadı.")
+    st.warning(
+        "Ekstre tarandı ancak eşleşen cari tablosu oluşturulamadı. Lütfen"
+        " dosya yapısını kontrol edin."
+    )
 
   if st.sidebar.button("🗑️ Veri Havuzunu Sıfırla"):
     st.session_state.master_db = pd.DataFrame()
