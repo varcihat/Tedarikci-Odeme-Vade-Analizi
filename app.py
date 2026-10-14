@@ -9,11 +9,9 @@ st.set_page_config(
 
 st.title("🤝 Tedarikçi Bazlı Net Borç ve Vade Performans Paneli")
 st.markdown(
-    "ERP Ekstresinden Otomatik Derlenen Tüm Cariler, Güncel Bakiyeler ve Vade"
-    " Karnesi."
+    "ERP Ekstresinden Kesin Bakiye ve Cari Bazlı Gerçek Borç Analizi."
 )
 
-# Oturum hafızasında ana veri havuzu
 if "master_db" not in st.session_state:
   st.session_state.master_db = pd.DataFrame()
 
@@ -43,50 +41,49 @@ if not st.session_state.master_db.empty:
   try:
     col_names = df.columns.tolist()
     desc_col = col_names[3] if len(col_names) > 3 else col_names[0]
-    borc_col = col_names[4] if len(col_names) > 4 else col_names[1]
-    alacak_col = col_names[5] if len(col_names) > 5 else col_names[2]
+    bakiye_col = col_names[6] if len(col_names) > 6 else col_names[6]
 
-    cariler_listesi = []
+    cariler_dict = {}
     aktif_cari = "Bilinmeyen Cari"
+    son_bakiye = 0.0
 
     for idx, row in df.iterrows():
       val = str(row[desc_col])
+
+      # Yeni cari unvanı başlangıcı
       if (
           "A.Ş." in val
           or "LTD" in val
           or "SANİ" in val
           or "TİC" in val
           or "AŞ" in val
-      ):
+      ) and "Vade Tarihi" not in val:
+        # Önceki cariyi kaydet
+        if aktif_cari != "Bilinmeyen Cari":
+          cariler_dict[aktif_cari] = son_bakiye
         aktif_cari = val
+        son_bakiye = 0.0
 
-      try:
-        b_val = float(row[borc_col]) if pd.notna(row[borc_col]) else 0.0
-      except:
-        b_val = 0.0
-      try:
-        a_val = float(row[alacak_col]) if pd.notna(row[alacak_col]) else 0.0
-      except:
-        a_val = 0.0
+      # Toplam satırındaki bakiye güncel net borcu verir
+      if "Toplam" in str(row[desc_col]):
+        try:
+          b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
+          son_bakiye = b_val
+        except:
+          pass
 
-      if b_val > 0 or a_val > 0:
-        cariler_listesi.append(
-            {"Cari Unvanı": aktif_cari, "Borç": b_val, "Alacak": a_val}
-        )
+    # Son cariyi de ekle
+    if aktif_cari != "Bilinmeyen Cari":
+      cariler_dict[aktif_cari] = son_bakiye
 
-    if cariler_listesi:
-      temp_df = pd.DataFrame(cariler_listesi)
-      ozet_df = (
-          temp_df.groupby("Cari Unvanı")[["Borç", "Alacak"]]
-          .sum()
-          .reset_index()
+    if cariler_dict:
+      ozet_df = pd.DataFrame(
+          list(cariler_dict.items()),
+          columns=["Cari Unvanı", "Ham_Bakiye"],
       )
-      ozet_df["Ham_Bakiye"] = ozet_df["Borç"] - ozet_df["Alacak"]
 
-      # Tutarı 1.256.765,23 TL formatına dönüştüren fonksiyon
       def format_tl(val):
         try:
-          # Önce stringe çevirip binlik ayraç ekleyelim
           formatted = (
               f"{val:,.2f}"
               .replace(",", "X")
@@ -112,19 +109,18 @@ if not st.session_state.master_db.empty:
           ]
       ]
     else:
-      display_df = pd.DataFrame({
-          "Bilgi": ["Ekstreden cari verileri çıkarılamadı."]
-      })
+      display_df = pd.DataFrame(
+          {"Bilgi": ["Ekstreden cari verileri çıkarılamadı."]}
+      )
 
   except Exception as parse_err:
-    display_df = pd.DataFrame({
-        "Hata": [f"Veri işleme detayı: {parse_err}"]
-    })
+    display_df = pd.DataFrame(
+        {"Hata": [f"Veri işleme detayı: {parse_err}"]}
+    )
 
-  st.subheader("📋 Tüm Cariler ve Güncel Borç Durumları")
+  st.subheader("📋 Tüm Cariler ve Gerçek Güncel Borç Durumları")
   st.dataframe(display_df, use_container_width=True)
 
-  # Üst Özet Metrikler
   col1, col2, col3 = st.columns(3)
   with col1:
     st.metric(label="Toplam Cari Sayısı", value=f"{len(display_df)} Firma")
@@ -142,9 +138,6 @@ if not st.session_state.master_db.empty:
       st.metric(label="Toplam Net Borç", value="Hesaplanıyor")
   with col3:
     st.metric(label="Genel Vade Ortalaması", value="64 Gün")
-
-  with st.expander("Orijinal Ham Ekstre Verilerini İncele"):
-    st.dataframe(df, use_container_width=True)
 
   if st.sidebar.button("🗑️ Veri Havuzunu Sıfırla"):
     st.session_state.master_db = pd.DataFrame()
