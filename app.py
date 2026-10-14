@@ -36,6 +36,9 @@ if uploaded_file is not None:
 if not st.session_state.master_db.empty:
   df = st.session_state.master_db
 
+  display_df = pd.DataFrame()
+  ozet_df = pd.DataFrame()
+
   try:
     col_names = df.columns.tolist()
     desc_col = col_names[3] if len(col_names) > 3 else col_names[0]
@@ -43,31 +46,33 @@ if not st.session_state.master_db.empty:
 
     cariler_dict = {}
     aktif_cari = None
-    toplam_goruldu = False
+    son_bakiye = 0.0
 
     for idx, row in df.iterrows():
       val = str(row[desc_col]) if pd.notna(row[desc_col]) else ""
+      col0 = str(row[0]) if pd.notna(row[0]) else ""
 
-      # Cari hesap başlangıç satırı tespiti (Kod formatı veya A.Ş./LTD geçmesi)
+      # Cari başlangıç tespiti
       if (
-          pd.notna(row[0])
-          and ("-" in str(row[0]) or len(str(row[0])) > 5)
+          col0 != ""
+          and ("-" in col0 or len(col0) > 4)
           and "Vade" not in val
+          and "Toplam" not in val
       ):
-        # Önceki cariyi kaydet
-        if aktif_cari and not toplam_goruldu:
-          cariler_dict[aktif_cari] = 0.0
+        if aktif_cari:
+          cariler_dict[aktif_cari] = son_bakiye
         aktif_cari = val
-        toplam_goruldu = False
+        son_bakiye = 0.0
 
-      # "Toplam" satırına ulaşıldığında o carinin kesin kapanış bakiyesini al
-      if "Toplam" in val and aktif_cari:
-        try:
-          b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
-          cariler_dict[aktif_cari] = b_val
-          toplam_goruldu = True
-        except:
-          pass
+      # Satırdaki bakiye takibi
+      try:
+        b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
+        son_bakiye = b_val
+      except:
+        pass
+
+    if aktif_cari:
+      cariler_dict[aktif_cari] = son_bakiye
 
     if cariler_dict:
       ozet_df = pd.DataFrame(
@@ -101,42 +106,37 @@ if not st.session_state.master_db.empty:
               "Vade Sapması",
           ]
       ]
-    else:
-      display_df = pd.DataFrame(
-          {"Bilgi": ["Ekstreden cari verileri çıkarılamadı."]}
-      )
 
   except Exception as parse_err:
-    display_df = pd.DataFrame(
-        {"Hata": [f"Veri işleme detayı: {parse_err}"]}
-    )
+    st.error(f"Veri işleme hatası: {parse_err}")
 
-  st.subheader("📋 Tüm Cariler ve Kesin Güncel Borç Durumları")
-  st.dataframe(display_df, use_container_width=True)
+  if not display_df.empty:
+    st.subheader("📋 Tüm Cariler ve Kesin Güncel Borç Durumları")
+    st.dataframe(display_df, use_container_width=True)
 
-  col1, col2, col3 = st.columns(3)
-  with col1:
-    st.metric(label="Toplam Cari Sayısı", value=f"{len(display_df)} Firma")
-  with col2:
-    if "Ham_Bakiye" in ozet_df.columns:
-      toplam_borc = ozet_df["Ham_Bakiye"].sum()
-      toplam_str = (
-          f"{toplam_borc:,.2f}"
-          .replace(",", "X")
-          .replace(".", ",")
-          .replace("X", ".")
-      )
-      st.metric(label="Toplam Net Borç", value=f"{toplam_str} TL")
-    else:
-      st.metric(label="Toplam Net Borç", value="Hesaplanıyor")
-  with col3:
-    st.metric(label="Genel Vade Ortalaması", value="64 Gün")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      st.metric(label="Toplam Cari Sayısı", value=f"{len(display_df)} Firma")
+    with col2:
+      if not ozet_df.empty and "Ham_Bakiye" in ozet_df.columns:
+        toplam_borc = ozet_df["Ham_Bakiye"].sum()
+        toplam_str = (
+            f"{toplam_borc:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )
+        st.metric(label="Toplam Net Borç", value=f"{toplam_str} TL")
+      else:
+        st.metric(label="Toplam Net Borç", value="0,00 TL")
+    with col3:
+      st.metric(label="Genel Vade Ortalaması", value="64 Gün")
+  else:
+    st.warning("Veriler işlendi ancak gösterilecek tablo oluşturulamadı.")
 
   if st.sidebar.button("🗑️ Veri Havuzunu Sıfırla"):
     st.session_state.master_db = pd.DataFrame()
     st.rerun()
 
 else:
-  st.info(
-      "👈 Sol menüden ekstre dosyanızı yükleyerek tüm carilerinizi listeyin."
-  )
+  st.info("👈 Sol menüden ekstre dosyanızı yükleyerek tüm carilerinizi listeyin.")
