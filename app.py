@@ -8,9 +8,7 @@ st.set_page_config(
 )
 
 st.title("🤝 Tedarikçi Bazlı Net Borç ve Vade Performans Paneli")
-st.markdown(
-    "ERP Ekstresinden Kesin Bakiye ve Cari Bazlı Gerçek Borç Analizi."
-)
+st.markdown("ERP Ekstresinden En Güncel Bakiye ve Cari Analizi.")
 
 if "master_db" not in st.session_state:
   st.session_state.master_db = pd.DataFrame()
@@ -50,29 +48,29 @@ if not st.session_state.master_db.empty:
     for idx, row in df.iterrows():
       val = str(row[desc_col])
 
-      # Yeni cari unvanı başlangıcı
+      # Yeni cari unvanı tespiti
       if (
-          "A.Ş." in val
-          or "LTD" in val
-          or "SANİ" in val
-          or "TİC" in val
-          or "AŞ" in val
-      ) and "Vade Tarihi" not in val:
-        # Önceki cariyi kaydet
+          ("A.Ş." in val or "LTD" in val or "SANİ" in val or "TİC" in val or "AŞ" in val)
+          and "Vade Tarihi" not in val
+          and "Gönderilen" not in val
+          and "Gelen" not in val
+      ):
+        # Önceki cariyi hafızaya at
         if aktif_cari != "Bilinmeyen Cari":
           cariler_dict[aktif_cari] = son_bakiye
         aktif_cari = val
         son_bakiye = 0.0
 
-      # Toplam satırındaki bakiye güncel net borcu verir
-      if "Toplam" in str(row[desc_col]):
-        try:
-          b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
+      # Her satırdaki bakiyeyi takip et, en son kalan bakiye o carinin güncel borcudur
+      try:
+        b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
+        # Eğer satır bir ay özeti veya toplam ise doğrudan o bakiye güncel bakiyedir
+        if " / " in val or "Toplam" in val or "Devir" in val or pd.notna(row[0]):
           son_bakiye = b_val
-        except:
-          pass
+      except:
+        pass
 
-    # Son cariyi de ekle
+    # Son cariyi ekle
     if aktif_cari != "Bilinmeyen Cari":
       cariler_dict[aktif_cari] = son_bakiye
 
@@ -82,6 +80,7 @@ if not st.session_state.master_db.empty:
           columns=["Cari Unvanı", "Ham_Bakiye"],
       )
 
+      # 0 TL olanları veya çok küçük küsuratları temizlemek isteyebilirsin ama şimdilik tüm carileri gösterelim
       def format_tl(val):
         try:
           formatted = (
@@ -144,6 +143,4 @@ if not st.session_state.master_db.empty:
     st.rerun()
 
 else:
-  st.info(
-      "👈 Sol menüden ekstre dosyanızı yükleyerek tüm carilerinizi listeyin."
-  )
+  st.info("👈 Sol menüden ekstre dosyanızı yükleyerek tüm carilerinizi listeyin.")
