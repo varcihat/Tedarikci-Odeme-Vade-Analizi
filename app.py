@@ -8,7 +8,7 @@ st.set_page_config(
 )
 
 st.title("🤝 Tedarikçi Bazlı Net Borç ve Vade Performans Paneli")
-st.markdown("ERP Ekstresinden En Güncel Bakiye ve Cari Analizi.")
+st.markdown("ERP Ekstresinden Kesin Bakiye ve Cari Analizi.")
 
 if "master_db" not in st.session_state:
   st.session_state.master_db = pd.DataFrame()
@@ -42,37 +42,32 @@ if not st.session_state.master_db.empty:
     bakiye_col = col_names[6] if len(col_names) > 6 else col_names[6]
 
     cariler_dict = {}
-    aktif_cari = "Bilinmeyen Cari"
-    son_bakiye = 0.0
+    aktif_cari = None
+    toplam_goruldu = False
 
     for idx, row in df.iterrows():
-      val = str(row[desc_col])
+      val = str(row[desc_col]) if pd.notna(row[desc_col]) else ""
 
-      # Yeni cari unvanı tespiti
+      # Cari hesap başlangıç satırı tespiti (Kod formatı veya A.Ş./LTD geçmesi)
       if (
-          ("A.Ş." in val or "LTD" in val or "SANİ" in val or "TİC" in val or "AŞ" in val)
-          and "Vade Tarihi" not in val
-          and "Gönderilen" not in val
-          and "Gelen" not in val
+          pd.notna(row[0])
+          and ("-" in str(row[0]) or len(str(row[0])) > 5)
+          and "Vade" not in val
       ):
-        # Önceki cariyi hafızaya at
-        if aktif_cari != "Bilinmeyen Cari":
-          cariler_dict[aktif_cari] = son_bakiye
+        # Önceki cariyi kaydet
+        if aktif_cari and not toplam_goruldu:
+          cariler_dict[aktif_cari] = 0.0
         aktif_cari = val
-        son_bakiye = 0.0
+        toplam_goruldu = False
 
-      # Her satırdaki bakiyeyi takip et, en son kalan bakiye o carinin güncel borcudur
-      try:
-        b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
-        # Eğer satır bir ay özeti veya toplam ise doğrudan o bakiye güncel bakiyedir
-        if " / " in val or "Toplam" in val or "Devir" in val or pd.notna(row[0]):
-          son_bakiye = b_val
-      except:
-        pass
-
-    # Son cariyi ekle
-    if aktif_cari != "Bilinmeyen Cari":
-      cariler_dict[aktif_cari] = son_bakiye
+      # "Toplam" satırına ulaşıldığında o carinin kesin kapanış bakiyesini al
+      if "Toplam" in val and aktif_cari:
+        try:
+          b_val = float(row[bakiye_col]) if pd.notna(row[bakiye_col]) else 0.0
+          cariler_dict[aktif_cari] = b_val
+          toplam_goruldu = True
+        except:
+          pass
 
     if cariler_dict:
       ozet_df = pd.DataFrame(
@@ -80,7 +75,6 @@ if not st.session_state.master_db.empty:
           columns=["Cari Unvanı", "Ham_Bakiye"],
       )
 
-      # 0 TL olanları veya çok küçük küsuratları temizlemek isteyebilirsin ama şimdilik tüm carileri gösterelim
       def format_tl(val):
         try:
           formatted = (
@@ -117,7 +111,7 @@ if not st.session_state.master_db.empty:
         {"Hata": [f"Veri işleme detayı: {parse_err}"]}
     )
 
-  st.subheader("📋 Tüm Cariler ve Gerçek Güncel Borç Durumları")
+  st.subheader("📋 Tüm Cariler ve Kesin Güncel Borç Durumları")
   st.dataframe(display_df, use_container_width=True)
 
   col1, col2, col3 = st.columns(3)
@@ -143,4 +137,6 @@ if not st.session_state.master_db.empty:
     st.rerun()
 
 else:
-  st.info("👈 Sol menüden ekstre dosyanızı yükleyerek tüm carilerinizi listeyin.")
+  st.info(
+      "👈 Sol menüden ekstre dosyanızı yükleyerek tüm carilerinizi listeyin."
+  )
